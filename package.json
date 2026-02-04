@@ -17,6 +17,8 @@
     "apify-client": "^2.22.0",
     "axios": "^1.13.4",
     "cheerio": "^1.2.0",
+    "dotenv": "^17.2.3",
+    "json2csv": "^6.0.0-alpha.2",
     "node-fetch": "^3.3.2"
   }
 }

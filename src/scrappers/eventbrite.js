@@ -3,6 +3,8 @@ import { chromium } from "playwright";
 import { normaliseEvent } from "../normalise.js";
 
 export async function scrapeEventbrite(mode, links) {
+    console.log("Crawling eventbrite");
+    
     const normalisedMode = mode === "refresh" ? "refresh" : "discovery";
     const existingLinks = new Set(
         Array.isArray(links)
@@ -94,7 +96,7 @@ export async function scrapeEventbrite(mode, links) {
             await crawlEvent(link);
         }
     } else {
-        for (let pageNum = 1; pageNum <= 2; pageNum++) {
+        for (let pageNum = 1; pageNum <= 5; pageNum++) {
             const url =
                 pageNum === 1
                     ? BASE_URL

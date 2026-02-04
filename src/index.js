@@ -1,8 +1,10 @@
+import "dotenv/config";
+
 import { scrapeEventbrite } from "./scrappers/eventbrite.js";
 import { getExistingEvents } from "./UniChatComm/getEventsFromUniChat.js";
 import { postEvents } from "./UniChatComm/postToUniChat.js";
-// import { scrapeRA } from "./scrappers/ra.js";
-import { scrapeRA } from "./scrappers/ra2.js";
+import { scrapeRA } from "./scrappers/ra.js";
+import { scrapeUniPages } from './scrappers/uni_pages.js'
 
 function getMode() {
     const directArg = process.argv.slice(2).find(arg => !arg.startsWith("-"));
@@ -22,18 +24,20 @@ function getMode() {
 }
 
 async function run() {
-    // const mode = getMode();
-    // const existingEvents = getExistingEvents();
+    const mode = getMode();
+    // const existingEvents = await getExistingEvents();
+    const existingEvents = {eventbrite: [], ra: []};
 
     const events = [
-        // ...(await scrapeEventbrite(mode, existingEvents.eventbrite)),
-        ...(await scrapeRA(10))
+        ...(await scrapeEventbrite(mode, existingEvents.eventbrite)),
+        ...(await scrapeRA(mode, existingEvents, mode==="discovery" ? 200 : existingEvents.ra.length())),
+        // ...(await scrapeUniPages(mode, existingEvents))
     ];
 
     console.log(events);
     
 
-    // await postEvents(events);
+    console.log(await postEvents(events));
 }
 
 run().catch(console.error);
