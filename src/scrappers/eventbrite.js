@@ -1,6 +1,8 @@
 // src/scrapers/eventbrite.js
 import { chromium } from "playwright";
 import { normaliseEvent } from "../normalise.js";
+import { parse } from 'json2csv';
+import fs from 'node:fs';
 
 export async function scrapeEventbrite(mode, links) {
     console.log("Crawling eventbrite");
@@ -123,6 +125,10 @@ export async function scrapeEventbrite(mode, links) {
                 await crawlEvent(link);
             }
         }
+
+        const csv = parse(events);
+        const filename = `edinburgh-eventbrite-events.csv`;
+        fs.writeFileSync(filename, csv);
     }
 
     await browser.close();

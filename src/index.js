@@ -4,6 +4,7 @@ import { scrapeEventbrite } from "./scrappers/eventbrite.js";
 import { getExistingEvents } from "./UniChatComm/getEventsFromUniChat.js";
 import { postEvents } from "./UniChatComm/postToUniChat.js";
 import { scrapeRA } from "./scrappers/ra.js";
+import { scrapeRA2 } from "./scrappers/ra2.js";
 import { scrapeUniPages } from './scrappers/uni_pages.js'
 
 function getMode() {
@@ -31,10 +32,11 @@ async function run() {
     const events = [
         ...(await scrapeEventbrite(mode, existingEvents.eventbrite)),
         ...(await scrapeRA(mode, existingEvents, mode==="discovery" ? 200 : existingEvents.ra.length())),
+        // ...(await scrapeRA2()),
         // ...(await scrapeUniPages(mode, existingEvents))
     ];
 
-    console.log(events);
+    console.log(events.length);
     
 
     console.log(await postEvents(events));

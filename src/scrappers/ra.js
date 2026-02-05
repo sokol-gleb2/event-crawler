@@ -63,12 +63,12 @@ export async function scrapeRA(mode = "discovery", links = [], resultsToCrawl = 
                         one_liner: data?.cost,
                         description: data?.content,
                         image_url: data?.images.filter(i => i.type==="FLYERFRONT")[0].filename,
-                        location: data?.venue?.name + ", " + items?.venue?.address,
+                        location: data?.venue?.name + ", " + data?.venue?.address,
                         booking_url: `https://ra.co/${data?.contentUrl}`,
                         date_start: data?.date?.split("T")[0],
                         time_start: data?.startTime?.split("T")[1],
                         source: "ra",
-                        source_event_id: data?.id ?? `https://ra.co/${items?.contentUrl}`,
+                        source_event_id: data?.id ?? `https://ra.co/${data?.contentUrl}`,
                         attending: data?.interestedCount,
                     })
                 );
