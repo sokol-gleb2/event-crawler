@@ -9,13 +9,34 @@ const API_KEY = process.env.APIFY_KEY;
 const client = new ApifyClient({
     token: API_KEY,
 });
-const events = [];
 
 export async function scrapeRA(mode = "discovery", links = [], resultsToCrawl = 10) {
     console.log("Crawling RA");
+    const events = [];
     
     try {
         let run;
+
+        const normalisedLinks = Array.isArray(links)
+            ? links
+                .map((item) => {
+                    if (typeof item === "string") return item;
+                    if (!item || typeof item !== "object") return null;
+                    return item.booking_url ?? item.url ?? item.link ?? item.source_event_id ?? null;
+                })
+                .filter((link) => typeof link === "string" && link.trim().length > 0)
+                .map((url) => url.trim())
+                .map((url) => (url.startsWith("/") ? `https://ra.co${url}` : url))
+                .map((url) => ({ url }))
+            : [];
+
+        const existingLinks = new Set(links);
+        console.log(existingLinks.has('https://ra.co/events/2363219'));
+        console.log(existingLinks.has('https://ra.co/events/2362813'));
+        
+        
+        
+
         if (mode === "discovery") {
             // Run the Resident Advisor scraper actor
             run = await client.actor('chalkandcheese/ra-events-scraper').call({
@@ -29,8 +50,12 @@ export async function scrapeRA(mode = "discovery", links = [], resultsToCrawl = 
                 }
             });
         } else {
+            const refreshStartUrls = normalisedLinks.length
+                ? normalisedLinks
+                : [{ url: "https://ra.co/events/uk/edinburgh" }];
+
             run = await client.actor('chalkandcheese/ra-events-scraper').call({
-                "startUrls": [links.map(l => ({ url: l }))],
+                "startUrls": refreshStartUrls,
                 "maxItems": resultsToCrawl,
                 // "downloadDelay": 1500,
                 "proxyConfiguration": {
@@ -43,20 +68,17 @@ export async function scrapeRA(mode = "discovery", links = [], resultsToCrawl = 
         const { items } = await client.dataset(run.defaultDatasetId).listItems();
         
         console.log(`Found ${items.length} events in Edinburgh:`);
-        // items.forEach((event, index) => {
-        //     console.log(`\n${index + 1}. ${event.name || event.title}`);
-        //     console.log(`   Date: ${event.date}`);
-        //     console.log(`   Venue: ${event.venue}`);
-        //     console.log(`   URL: ${event.url}`);
-        // });
-
-        const csv = parse(items);
-        const filename = `edinburgh-events.csv`;
-        fs.writeFileSync(filename, csv);
-
 
         items.forEach(data => {
             try {
+                const bookingUrl = data?.contentUrl
+                    ? `https://ra.co${String(data.contentUrl).replace(/^\/+/, "")}`
+                    : null;
+
+                if (mode === "discovery" && bookingUrl && existingLinks.has(bookingUrl)) {
+                    return;
+                }
+
                 events.push(
                     normaliseEvent({
                         title: data?.title,
@@ -64,18 +86,24 @@ export async function scrapeRA(mode = "discovery", links = [], resultsToCrawl = 
                         description: data?.content,
                         image_url: data?.images.filter(i => i.type==="FLYERFRONT")[0].filename,
                         location: data?.venue?.name + ", " + data?.venue?.address,
-                        booking_url: `https://ra.co/${data?.contentUrl}`,
+                        booking_url: bookingUrl,
                         date_start: data?.date?.split("T")[0],
                         time_start: data?.startTime?.split("T")[1],
                         source: "ra",
-                        source_event_id: data?.id ?? `https://ra.co/${data?.contentUrl}`,
+                        source_event_id: data?.id ?? bookingUrl,
                         attending: data?.interestedCount,
                     })
                 );
             } catch (error) {
-                
+                console.error(error);
             }
         });
+
+        if (events.length > 0) {
+            const csv = parse(events);
+            const filename = `edinburgh-events.csv`;
+            fs.writeFileSync(filename, csv);
+        }
 
         return events;
         

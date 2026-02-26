@@ -51,6 +51,9 @@ export async function scrapeEventbrite(mode, links) {
                 return null;
             });
 
+            // some necessary data
+            if (!data.startDate || !data.description || !data.name) return null;
+
             let one_liner;
             const isFree = await page.$(".CondensedConversionBar-module__priceTag___3AnIu");
             if (isFree) one_liner = "Free";
@@ -119,16 +122,22 @@ export async function scrapeEventbrite(mode, links) {
                 ? eventLinks.filter(link => !existingLinks.has(link))
                 : eventLinks;
 
+            console.log(linksToCrawl);
+            let i = 0;
             for (const link of linksToCrawl) {
+                i++;
+                console.log("Progress: " + i/linksToCrawl.length);
                 if (linksCrawled.includes(link)) continue;
                 linksCrawled.push(link);
                 await crawlEvent(link);
             }
         }
 
-        const csv = parse(events);
-        const filename = `edinburgh-eventbrite-events.csv`;
-        fs.writeFileSync(filename, csv);
+        if (events.length > 0) {
+            const csv = parse(events);
+            const filename = `edinburgh-eventbrite-events.csv`;
+            fs.writeFileSync(filename, csv);
+        }
     }
 
     await browser.close();

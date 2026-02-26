@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { writeFile } from "fs/promises";
+import { parse } from "json2csv";
 
 import { scrapeEventbrite } from "./scrappers/eventbrite.js";
 import { getExistingEvents } from "./UniChatComm/getEventsFromUniChat.js";
@@ -26,15 +28,23 @@ function getMode() {
 
 async function run() {
     const mode = getMode();
-    // const existingEvents = await getExistingEvents();
-    const existingEvents = {eventbrite: [], ra: []};
+    const existingEvents = await getExistingEvents();
 
     const events = [
         ...(await scrapeEventbrite(mode, existingEvents.eventbrite)),
-        ...(await scrapeRA(mode, existingEvents, mode==="discovery" ? 200 : existingEvents.ra.length())),
-        // ...(await scrapeRA2()),
-        // ...(await scrapeUniPages(mode, existingEvents))
+        ...(await scrapeRA(
+            mode,
+            existingEvents.ra,
+            mode === "discovery" ? 200 : Math.max(existingEvents.ra.length, 100)
+        )),
+        ...(await scrapeUniPages(mode, []))
     ];
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const csvFilename = `eusa-events-crawl-${timestamp}.csv`;
+    const csv = parse(events);
+    await writeFile(csvFilename, csv, "utf8");
+    console.log(`Saved CSV: ${csvFilename}`);
 
     console.log(events.length);
     

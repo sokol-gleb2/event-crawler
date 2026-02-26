@@ -11,6 +11,7 @@
 import { chromium } from "playwright";
 import axios from "axios";
 import { load } from "cheerio";
+import { mkdir, writeFile } from "fs/promises";
 import { normaliseEvent } from "../normalise.js";
 
 const USER_AGENT =
@@ -175,58 +176,26 @@ function normaliseFromSchemaEvent(eventData, source, fallbackUrl) {
 async function extractEventsFromPage(page, source, fallbackUrl) {
     const events = [];
     const data = await page.evaluate(() => {
-        
-        if (source === "uoe") {
-            const scripts = Array.from(
-                document.querySelectorAll('script[type="application/ld+json"]')
-            );
-            const parsed = [];
-            for (const script of scripts) {
+        const parsed = Array.from(
+            document.querySelectorAll('script[type="application/ld+json"]')
+        )
+            .map(script => script.textContent?.trim())
+            .filter(Boolean)
+            .flatMap(raw => {
                 try {
-                    const json = JSON.parse(script.textContent || "");
-                    parsed.push(json);
-                } catch {}
-            }
+                    return [JSON.parse(raw)];
+                } catch {
+                    return [];
+                }
+            });
 
-            parsed[0].filter(j => j?.["@type"]==="Event").forEach(event => {
-                events.push(
-                    normaliseEvent({
-                        title: event?.name,
-                        one_liner: "University of Edinburgh",
-                        description: event?.description,
-                        image_url: event?.image[0],
-                        location: event?.location?.name + ", " + event?.location?.streetAddress + ", " + event?.location?.postalCode,
-                        booking_url: event?.url,
-                        date_start: event?.startDate?.split("T")[0],
-                        time_start: event?.startDate?.split("T")[1],
-                        source: "uoe",
-                        source_event_id: event?.url,
-                    })
-                );
-            })
-        } else if (source === "eusa") {
-            events.push(
-                normaliseEvent({
-                    title: document.querySelector('h1')?.content || null,
-                    one_liner: event?.cost,
-                    description: document.querySelector("article.g-mb-15 div[class='g-font-size-16 g-line-height-1_8 g-my-30']")?.innerText || null,
-                    image_url: document.querySelector('article img.img-fluid')?.src || null,
-                    location: event?.location?.name + ", " + event?.location?.streetAddress + ", " + event?.location?.postalCode,
-                    booking_url: fallbackUrl,
-                    date_start: event?.startDate?.split("T")[0],
-                    time_start: event?.startDate?.split("T")[1],
-                    source: "uoe",
-                    source_event_id: event?.url,
-                })
-            );
-            // const og = {
-            //     title: document.querySelector('h1')?.content || null,
-            //     description:
-            //         document.querySelector("article.g-mb-15 div[class='g-font-size-16 g-line-height-1_8 g-my-30']")?.innerText || null,
-            //     image: document.querySelector('article img.img-fluid')?.src || null,
-            //     url: document.querySelector('meta[property="og:url"]')?.content || null
-            // };
-        }
+        const og = {
+            title: document.querySelector('meta[property="og:title"]')?.content || null,
+            description:
+                document.querySelector('meta[property="og:description"]')?.content || null,
+            image: document.querySelector('meta[property="og:image"]')?.content || null,
+            url: document.querySelector('meta[property="og:url"]')?.content || null
+        };
 
         const fallback = {
             title: document.querySelector("h1")?.textContent?.trim() || null,
@@ -318,13 +287,6 @@ async function collectLinks(page, hostIncludes, pathIncludes) {
     return links;
 }
 
-async function scrapeUoe(page) {
-    const listUrl = "https://www.ed.ac.uk/events/latest";
-    await page.goto(listUrl, { waitUntil: "networkidle" });
-    const events = await extractEventsFromPage(page, "uoe", listUrl);
-    return events;
-}
-
 async function scrapeNativeListing(page, baseUrl, source, existingLinks, buttonText) {
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     await clickLoadMore(
@@ -350,6 +312,106 @@ async function scrapeNativeListing(page, baseUrl, source, existingLinks, buttonT
     return events;
 }
 
+async function extractEventsFromEUSAPage(page, link) {
+    const data = await page.evaluate(() => {
+        const text = selector =>
+            document.querySelector(selector)?.textContent?.trim() || null;
+        const attr = (selector, name) =>
+            document.querySelector(selector)?.getAttribute(name)?.trim() || null;
+        const to24hWithSeconds = value => {
+            if (!value) return null;
+            const cleaned = value.trim().toLowerCase();
+            const match = cleaned.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/);
+            if (!match) return null;
+            let hour = Number(match[1]);
+            const minute = match[2] ?? "00";
+            const meridiem = match[3];
+            if (meridiem === "pm" && hour !== 12) hour += 12;
+            if (meridiem === "am" && hour === 12) hour = 0;
+            return `${String(hour).padStart(2, "0")}:${minute}:00`;
+        };
+        const parseStartTimeFromTimeText = value => {
+            if (!value) return null;
+            const parts = value.trim().split(" | ");
+            if (parts.length < 2) return null;
+            const range = parts[1].split(" - ");
+            if (!range.length) return null;
+            return to24hWithSeconds(range[0]);
+        };
+        const parseDate = value => {
+            if (!value) return null;
+            const match = value.match(/^\d{4}-\d{2}-\d{2}/);
+            return match ? match[0] : null;
+        };
+
+        const dateRows = Array.from(document.querySelectorAll(".row.event-date-card")).map(
+            row => {
+                const datetimeRaw =
+                    row.querySelector("time[datetime]")?.getAttribute("datetime")?.trim() ||
+                    null;
+                const timeText = row.querySelector("time[datetime]")?.textContent || null;
+                return {
+                    one_liner:
+                        row.querySelector("p.mb-1.g-font-size-16")?.textContent?.trim() ||
+                        null,
+                    date_start: parseDate(datetimeRaw),
+                    time_start: parseStartTimeFromTimeText(timeText),
+                    location:
+                        row.querySelector("p.g-font-weight-300.mb-0")?.textContent?.trim() ||
+                        null
+                };
+            }
+        );
+
+        const fallbackTimeText = document.querySelector("time[datetime]")?.textContent || null;
+
+        return {
+            title: text("h1.h1"),
+            one_liner: text(".g-font-size-16 p"),
+            image_url: attr("article img.img-fluid", "src"),
+            description: text(".g-font-size-16"),
+            date_start: parseDate(attr("time[datetime]", "datetime")),
+            time_start: parseStartTimeFromTimeText(fallbackTimeText),
+            location: text("time[datetime] + p.g-font-weight-300.mb-0"),
+            dateRows,
+        };
+    });
+
+    if (!data.title && !data.description) return [];
+
+    if (data.dateRows.length) {
+        return data.dateRows.map((row, idx) =>
+            normaliseEvent({
+                title: data.title,
+                one_liner: row.one_liner ?? data.one_liner,
+                image_url: absoluteUrl(link, data.image_url),
+                booking_url: link,
+                description: data.description,
+                date_start: row.date_start,
+                time_start: row.time_start,
+                location: row.location ?? data.location,
+                source: "eusa",
+                source_event_id: row.date_start ? `${link}#${row.date_start}` : `${link}#${idx}`
+            })
+        );
+    }
+
+    return [
+        normaliseEvent({
+            title: data.title,
+            one_liner: data.one_liner,
+            image_url: absoluteUrl(link, data.image_url),
+            booking_url: link,
+            description: data.description,
+            date_start: data.date_start,
+            time_start: data.time_start,
+            location: data.location,
+            source: "eusa",
+            source_event_id: link
+        })
+    ];
+}
+
 async function scrapeEusa(page, existingLinks) {
     const baseUrl = "https://www.eusa.ed.ac.uk/events";
     await page.goto(baseUrl, { waitUntil: "networkidle" });
@@ -369,10 +431,8 @@ async function scrapeEusa(page, existingLinks) {
     const events = [];
     for (const link of linksToCrawl) {
         await page.goto(link, { waitUntil: "networkidle" });
-        const detailEvents = await extractEventsFromPage(page, "eusa", link);
-        if (detailEvents.length) {
-            events.push(...detailEvents);
-        }
+        const details = await extractEventsFromEUSAPage(page, link);
+        if (details.length) events.push(...details);
     }
 
     return events;
@@ -458,34 +518,24 @@ export async function scrapeUniPages(mode = "discovery", links = []) {
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ userAgent: USER_AGENT });
 
-    const uoeExisting = extractExistingLinks(links, "uoe");
-    const eusaExisting = extractExistingLinks(links, "eusa");
-    const napierExisting = extractExistingLinks(links, "napier");
+    // const eusaExisting = extractExistingLinks(links, "eusa");
+    // const napierExisting = extractExistingLinks(links, "napier");
 
     const events = [];
 
     try {
-        if (mode === "refresh" && uoeExisting.size) {
-            for (const link of uoeExisting) {
-                await page.goto(link, { waitUntil: "networkidle" });
-                const detailEvents = await extractEventsFromPage(page, "uoe", link);
-                events.push(...detailEvents);
-            }
-        } else {
-            events.push(...(await scrapeUoe(page)));
-        }
 
         events.push(...(await scrapeEusa(page, mode === "refresh" ? eusaExisting : null)));
-        events.push(
-            ...(await scrapeNativeListing(
-                page,
-                "https://edinburghnapier.native.fm/",
-                "napier",
-                mode === "refresh" ? napierExisting : null,
-                "Load More"
-            ))
-        );
-        events.push(...(await scrapeHwUnion()));
+        // events.push(
+        //     ...(await scrapeNativeListing(
+        //         page,
+        //         "https://edinburghnapier.native.fm/",
+        //         "napier",
+        //         mode === "refresh" ? napierExisting : null,
+        //         "Load More"
+        //     ))
+        // );
+        // events.push(...(await scrapeHwUnion()));
     } catch (error) {
         console.log(events);
         console.warn(error);
