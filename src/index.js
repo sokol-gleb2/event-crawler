@@ -8,6 +8,8 @@ import { postEvents } from "./UniChatComm/postToUniChat.js";
 import { scrapeRA } from "./scrappers/ra.js";
 import { scrapeRA2 } from "./scrappers/ra2.js";
 import { scrapeUniPages } from './scrappers/uni_pages.js'
+import { scrapeFixr } from './scrappers/fixr.js'
+import LLM from "./llm-judge/LLM.js";
 
 function getMode() {
     const directArg = process.argv.slice(2).find(arg => !arg.startsWith("-"));
@@ -27,21 +29,35 @@ function getMode() {
 }
 
 async function run() {
+    const llm = new LLM();
     const mode = getMode();
     const existingEvents = await getExistingEvents();
 
+    const eventsToAdd = [];
+    const eventBriteEvents = await scrapeEventbrite(mode, existingEvents.eventbrite);
+    const fixrEvents = await scrapeFixr(mode, existingEvents.fixr ?? []);
+    const eventsToCheck = [...eventBriteEvents, ...fixrEvents];
+    const chunkSize = 5;
+
+    for (let i = 0; i < eventsToCheck.length; i += chunkSize) {
+        const chunk = eventsToCheck.slice(i, i + chunkSize);
+        const result = await llm.judge(chunk);
+        for (const r of result) eventsToAdd.push(chunk[r-1]);
+    }
+
+
     const events = [
-        ...(await scrapeEventbrite(mode, existingEvents.eventbrite)),
+        ...eventsToAdd,
         ...(await scrapeRA(
             mode,
             existingEvents.ra,
             mode === "discovery" ? 200 : Math.max(existingEvents.ra.length, 100)
         )),
-        ...(await scrapeUniPages(mode, []))
+        ...(await scrapeUniPages(mode, existingEvents)),
     ];
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const csvFilename = `eusa-events-crawl-${timestamp}.csv`;
+    const csvFilename = `events-crawl-${timestamp}.csv`;
     const csv = parse(events);
     await writeFile(csvFilename, csv, "utf8");
     console.log(`Saved CSV: ${csvFilename}`);

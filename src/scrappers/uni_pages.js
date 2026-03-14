@@ -287,26 +287,139 @@ async function collectLinks(page, hostIncludes, pathIncludes) {
     return links;
 }
 
+function splitApiDateTime(value) {
+    if (!value || typeof value !== "string") {
+        return { date_start: null, time_start: null };
+    }
+
+    const match = value.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2})?)/);
+    if (!match) return splitIsoDateTime(value);
+
+    return {
+        date_start: match[1],
+        time_start: match[2]
+    };
+}
+
+function buildNativeBookingUrl(baseUrl, slug, id) {
+    if (!slug || !id) return null;
+    return absoluteUrl(baseUrl, `/event/${slug}/${id}`);
+}
+
+function buildNativeOneLiner(event) {
+    const parts = [];
+    const price =
+        event?.priceFrom != null && event?.currency?.format
+            ? `${event.currency.format}${event.priceFrom}`
+            : null;
+    const categoryNames = Array.isArray(event?.categories)
+        ? event.categories.map(category => category?.name).filter(Boolean)
+        : [];
+    const promoter = event?.promoterGroup?.name || null;
+
+    if (price) parts.push(price);
+    if (promoter) parts.push(promoter);
+    if (categoryNames.length) parts.push(categoryNames.join(", "));
+
+    return parts.length ? parts.join(" | ") : null;
+}
+
+function cleanNativeDescriptionText(value) {
+    if (!value || typeof value !== "string") return null;
+
+    const lines = value
+        .replace(/\u00a0/g, " ")
+        .split("\n")
+        .map(line => line.replace(/\s+/g, " ").trim())
+        .filter(Boolean);
+
+    return lines.length ? lines.join("\n") : null;
+}
+
+function extractNativeDescription(html) {
+    if (!html || typeof html !== "string") return null;
+
+    const $ = load(html);
+    const container = $(
+        ".MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-12.MuiGrid-grid-md-6"
+    ).eq(3);
+
+    if (!container.length) return null;
+
+    const parts = container
+        .children("div")
+        .map((_, element) => cleanNativeDescriptionText($(element).text()))
+        .get()
+        .filter(Boolean);
+
+    return parts.length ? parts.join("\n\n") : null;
+}
+
 async function scrapeNativeListing(page, baseUrl, source, existingLinks, buttonText) {
-    await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await clickLoadMore(
-        page,
-        `button:has-text("${buttonText}"), a:has-text("${buttonText}")`
-    );
+    void page;
+    void buttonText;
 
-    const links = await collectLinks(page, ["native.fm"], ["/event/"]);
-    const linksToCrawl =
-        existingLinks && existingLinks.size
-            ? links.filter(link => !existingLinks.has(link))
-            : links;
-
+    const today = new Date().toISOString().slice(0, 10);
+    const deploymentId = "82";
+    let nextPage = 1;
     const events = [];
-    for (const link of linksToCrawl) {
-        await page.goto(link, { waitUntil: "networkidle" });
-        const detailEvents = await extractEventsFromPage(page, source, link);
-        if (detailEvents.length) {
-            events.push(...detailEvents);
+
+    while (nextPage) {
+        const apiUrl = `https://api.native.fm/api/deployment/v1/${deploymentId}/events/?filter=&from=${today}&page=${nextPage}&perPage=100`;
+        const response = await axios.get(apiUrl, {
+            headers: {
+                "User-Agent": USER_AGENT,
+                Accept: "application/json"
+            }
+        });
+
+        const pageEvents = Array.isArray(response.data?.data) ? response.data.data : [];
+        for (const event of pageEvents) {
+            const bookingUrl = buildNativeBookingUrl(baseUrl, event?.slug, event?.id);
+            if (
+                existingLinks &&
+                existingLinks.size &&
+                ((bookingUrl && existingLinks.has(bookingUrl)) ||
+                    (event?.id != null && existingLinks.has(String(event.id))))
+            ) {
+                continue;
+            }
+
+            const { date_start, time_start } = splitApiDateTime(event?.startAt);
+            const categoryNames = Array.isArray(event?.categories)
+                ? event.categories.map(category => category?.name).filter(Boolean)
+                : [];
+            let description = categoryNames.length ? categoryNames.join(", ") : null;
+
+            if (bookingUrl) {
+                try {
+                    const detailResponse = await axios.get(bookingUrl, {
+                        headers: {
+                            "User-Agent": USER_AGENT,
+                            Accept: "text/html,application/xhtml+xml"
+                        }
+                    });
+                    description = extractNativeDescription(detailResponse.data) || description;
+                } catch {}
+            }
+
+            events.push(
+                normaliseEvent({
+                    title: event?.name,
+                    one_liner: buildNativeOneLiner(event),
+                    image_url: event?.eventLargePhotoUrl || event?.eventPhotoUrl || event?.largePhoto,
+                    location: event?.eventPlace || null,
+                    booking_url: bookingUrl,
+                    description,
+                    date_start,
+                    time_start,
+                    source,
+                    source_event_id: bookingUrl || String(event?.id ?? "")
+                })
+            );
         }
+
+        nextPage = Number.isInteger(response.data?.nextPage) ? response.data.nextPage : null;
     }
 
     return events;
@@ -318,6 +431,8 @@ async function extractEventsFromEUSAPage(page, link) {
             document.querySelector(selector)?.textContent?.trim() || null;
         const attr = (selector, name) =>
             document.querySelector(selector)?.getAttribute(name)?.trim() || null;
+        const attrSelectLast = (selector, name) =>
+            document.querySelectorAll(selector)[document.querySelectorAll(selector).length-1]?.getAttribute(name)?.trim() || null;
         const to24hWithSeconds = value => {
             if (!value) return null;
             const cleaned = value.trim().toLowerCase();
@@ -368,7 +483,7 @@ async function extractEventsFromEUSAPage(page, link) {
         return {
             title: text("h1.h1"),
             one_liner: text(".g-font-size-16 p"),
-            image_url: attr("article img.img-fluid", "src"),
+            image_url: attrSelectLast(".container article img.img-fluid", "src"),
             description: text(".g-font-size-16"),
             date_start: parseDate(attr("time[datetime]", "datetime")),
             time_start: parseStartTimeFromTimeText(fallbackTimeText),
@@ -518,23 +633,22 @@ export async function scrapeUniPages(mode = "discovery", links = []) {
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ userAgent: USER_AGENT });
 
-    // const eusaExisting = extractExistingLinks(links, "eusa");
-    // const napierExisting = extractExistingLinks(links, "napier");
+    const eusaExisting = extractExistingLinks(links, "eusa");
+    const napierExisting = extractExistingLinks(links, "napier");
 
     const events = [];
 
     try {
-
         events.push(...(await scrapeEusa(page, mode === "refresh" ? eusaExisting : null)));
-        // events.push(
-        //     ...(await scrapeNativeListing(
-        //         page,
-        //         "https://edinburghnapier.native.fm/",
-        //         "napier",
-        //         mode === "refresh" ? napierExisting : null,
-        //         "Load More"
-        //     ))
-        // );
+        events.push(
+            ...(await scrapeNativeListing(
+                page,
+                "https://edinburghnapier.native.fm/",
+                "napier",
+                mode === "refresh" ? napierExisting : null,
+                "Load More"
+            ))
+        );
         // events.push(...(await scrapeHwUnion()));
     } catch (error) {
         console.log(events);
