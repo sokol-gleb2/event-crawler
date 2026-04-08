@@ -72,7 +72,7 @@ export async function scrapeRA(mode = "discovery", links = [], resultsToCrawl = 
         items.forEach(data => {
             try {
                 const bookingUrl = data?.contentUrl
-                    ? `https://ra.co${String(data.contentUrl).replace(/^\/+/, "")}`
+                    ? `https://ra.co/${String(data.contentUrl).replace(/^\/+/, "")}`
                     : null;
 
                 if (mode === "discovery" && bookingUrl && existingLinks.has(bookingUrl)) {
