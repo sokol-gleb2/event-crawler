@@ -13,6 +13,7 @@ import axios from "axios";
 import { load } from "cheerio";
 import { mkdir, writeFile } from "fs/promises";
 import { normaliseEvent } from "../normalise.js";
+import fs from "node:fs";
 
 const USER_AGENT =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
@@ -607,22 +608,46 @@ function extractHwEvents(html, year, baseUrl) {
 }
 
 async function scrapeHwUnion() {
-    const now = new Date();
-    const startYear = now.getFullYear();
-    const startMonth = now.getMonth() + 1;
-    const monthsToCrawl = [0, 1, 2].map(offset => {
-        const date = new Date(startYear, startMonth - 1 + offset, 1);
-        return { year: date.getFullYear(), month: date.getMonth() + 1 };
-    });
+    const fileUrl = new URL("../docs/hwData.json", import.meta.url);
+    const response = JSON.parse(fs.readFileSync(fileUrl, "utf8"));
 
+    const results = Array.isArray(response.response?.resultPacket?.results)
+        ? response.response.resultPacket.results
+        : [];
     const events = [];
-    for (const { year, month } of monthsToCrawl) {
-        const url = `https://www.hwunion.com/ents/eventlist/?month=${month}&year=${year}`;
-        const res = await axios.get(url, {
-            headers: { "User-Agent": USER_AGENT }
-        });
-        const monthEvents = extractHwEvents(res.data, year, url);
-        events.push(...monthEvents);
+
+    for (const result of results) {
+        const metadata =
+            result?.listMetadata && typeof result.listMetadata === "object"
+                ? result.listMetadata
+                : {};
+        const bookingUrl =
+            result?.liveUrl || result?.displayUrl || result?.indexUrl || null;
+        const startDateTime = Array.isArray(metadata.d) ? metadata.d[0] : null;
+        const { date_start, time_start } = splitApiDateTime(startDateTime);
+        const imageUrl = Array.isArray(metadata.image) ? metadata.image[0] : null;
+        const attendanceTypes = Array.isArray(metadata.attendanceType)
+            ? metadata.attendanceType.filter(Boolean)
+            : [];
+        const eventTypes = Array.isArray(metadata.eventType)
+            ? metadata.eventType.filter(Boolean)
+            : [];
+        const oneLinerParts = [...eventTypes, ...attendanceTypes];
+
+        events.push(
+            normaliseEvent({
+                title: result?.title || (Array.isArray(metadata.t) ? metadata.t[0]?.trim() : null),
+                one_liner: metadata.c ? metadata.c[1] : oneLinerParts.join(" | "),
+                image_url: imageUrl,
+                location: attendanceTypes.length ? attendanceTypes.join(", ") : null,
+                booking_url: bookingUrl,
+                description: result?.summary || (Array.isArray(metadata.c) ? metadata.c[0] : null),
+                date_start,
+                time_start,
+                source: "hwunion",
+                source_event_id: bookingUrl || String(result?.docNum ?? result?.rank ?? "")
+            })
+        );
     }
 
     return events;
@@ -649,7 +674,7 @@ export async function scrapeUniPages(mode = "discovery", links = []) {
                 "Load More"
             ))
         );
-        // events.push(...(await scrapeHwUnion()));
+        events.push(...(await scrapeHwUnion()));
     } catch (error) {
         console.log(events);
         console.warn(error);
