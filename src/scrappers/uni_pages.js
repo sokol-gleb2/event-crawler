@@ -607,7 +607,7 @@ function extractHwEvents(html, year, baseUrl) {
     return events;
 }
 
-async function scrapeHwUnion() {
+async function scrapeHwUnion(hwunionExistingLinks) {
     const fileUrl = new URL("../docs/hwData.json", import.meta.url);
     const response = JSON.parse(fs.readFileSync(fileUrl, "utf8"));
 
@@ -623,6 +623,9 @@ async function scrapeHwUnion() {
                 : {};
         const bookingUrl =
             result?.liveUrl || result?.displayUrl || result?.indexUrl || null;
+
+        if (hwunionExistingLinks.has(bookingUrl)) continue;
+
         const startDateTime = Array.isArray(metadata.d) ? metadata.d[0] : null;
         const { date_start, time_start } = splitApiDateTime(startDateTime);
         const imageUrl = Array.isArray(metadata.image) ? metadata.image[0] : null;
@@ -660,6 +663,7 @@ export async function scrapeUniPages(mode = "discovery", links = []) {
 
     const eusaExisting = extractExistingLinks(links, "eusa");
     const napierExisting = extractExistingLinks(links, "napier");
+    const hwunionExisting = extractExistingLinks(links, "hwunion");
 
     const events = [];
 
@@ -674,7 +678,7 @@ export async function scrapeUniPages(mode = "discovery", links = []) {
                 "Load More"
             ))
         );
-        events.push(...(await scrapeHwUnion()));
+        events.push(...(await scrapeHwUnion(hwunionExisting)));
     } catch (error) {
         console.log(events);
         console.warn(error);
