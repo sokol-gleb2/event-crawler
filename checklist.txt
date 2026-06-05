@@ -1,0 +1,5 @@
+- Run fixr command
+- Run hw command
+- Uncomment api exit;
+- Make Proton Mail account
+- Replace Apify API

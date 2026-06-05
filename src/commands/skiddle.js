@@ -1,0 +1,2 @@
+// https://www.skiddle.com/api/v1/events/search/?radius=10&minDate=2026-06-05&hidecancelled=1&order=date&latitude=55.952&longitude=-3.188&limit=100&pub_key=42f25
+// https://www.skiddle.com/api/v1/events/search/?radius=10&minDate=2026-06-05&hidecancelled=1&order=date&latitude=55.952&longitude=-3.188&limit=100&offset=100&pub_key=42f25

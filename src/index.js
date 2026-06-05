@@ -9,6 +9,7 @@ import { scrapeRA } from "./scrappers/ra.js";
 import { scrapeRA2 } from "./scrappers/ra2.js";
 import { scrapeUniPages } from './scrappers/uni_pages.js'
 import { scrapeFixr } from './scrappers/fixr.js'
+import { scrapeSkiddle } from "./scrappers/skiddle.js";
 import LLM from "./llm-judge/LLM.js";
 
 function getMode() {
@@ -36,7 +37,8 @@ async function run() {
     const eventsToAdd = [];
     const eventBriteEvents = await scrapeEventbrite(mode, existingEvents.eventbrite);
     const fixrEvents = await scrapeFixr(mode, existingEvents.fixr ?? []);
-    const eventsToCheck = [...eventBriteEvents, ...fixrEvents];
+    const skiddleEvents = await scrapeSkiddle(mode, existingEvents.skiddle ?? []);
+    const eventsToCheck = [...eventBriteEvents, ...fixrEvents, ...skiddleEvents];
     const chunkSize = 5;
 
     for (let i = 0; i < eventsToCheck.length; i += chunkSize) {
