@@ -11,6 +11,7 @@ import { scrapeUniPages } from './scrappers/uni_pages.js'
 import { scrapeFixr } from './scrappers/fixr.js'
 import { scrapeSkiddle } from "./scrappers/skiddle.js";
 import LLM from "./llm-judge/LLM.js";
+import { runInstagramEventPipeline } from "./insta/index.js";
 
 function getMode() {
     const directArg = process.argv.slice(2).find(arg => !arg.startsWith("-"));
@@ -47,6 +48,10 @@ async function run() {
         for (const r of result) eventsToAdd.push(chunk[r-1]);
     }
 
+    const instagramEvents = await runInstagramEventPipeline({
+        existingUrls: existingEvents.instagram ?? [],
+    });
+
 
     const events = [
         ...eventsToAdd,
@@ -56,6 +61,7 @@ async function run() {
             mode === "discovery" ? 200 : Math.max(existingEvents.ra.length, 100)
         )),
         ...(await scrapeUniPages(mode, existingEvents)),
+        ...instagramEvents,
     ];
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
