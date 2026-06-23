@@ -1,8 +1,30 @@
 import { normaliseEvent } from "../normalise.js";
 
+function getCurrentDateParam() {
+    return new Date().toISOString().slice(0, 10);
+}
+
+function buildSkiddleApiUrl(offset) {
+    const url = new URL("https://www.skiddle.com/api/v1/events/search/");
+    url.searchParams.set("radius", "10");
+    url.searchParams.set("minDate", getCurrentDateParam());
+    url.searchParams.set("hidecancelled", "1");
+    url.searchParams.set("order", "date");
+    url.searchParams.set("latitude", "55.952");
+    url.searchParams.set("longitude", "-3.188");
+    url.searchParams.set("limit", "100");
+    url.searchParams.set("pub_key", "42f25");
+
+    if (Number.isFinite(offset)) {
+        url.searchParams.set("offset", String(offset));
+    }
+
+    return url.toString();
+}
+
 const SKIDDLE_API_URLS = [
-    "https://www.skiddle.com/api/v1/events/search/?radius=10&minDate=2026-06-23&hidecancelled=1&order=date&latitude=55.952&longitude=-3.188&limit=100&pub_key=42f25",
-    // "https://www.skiddle.com/api/v1/events/search/?radius=10&minDate=2026-06-05&hidecancelled=1&order=date&latitude=55.952&longitude=-3.188&limit=100&offset=100&pub_key=42f25"
+    buildSkiddleApiUrl()
+    // buildSkiddleApiUrl(100)
 ];
 
 function extractExistingLinks(links) {
