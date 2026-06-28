@@ -21,6 +21,8 @@ export default class LLM {
             - It is okay to choose all events or no events.
             - Only include indexes that exist in the input list.
 
+            Don't be too harsh and include events from from vareity of interests.
+
             Events:
         `;
     }
